@@ -2,21 +2,66 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 from flask import Flask, request, jsonify, url_for, Blueprint
-from api.models import db, User
+from api.models import db, User, Countries, Posts, Tags
 from api.utils import generate_sitemap, APIException
 from flask_cors import CORS
-
+import json
 api = Blueprint('api', __name__)
-
 # Allow CORS requests to this API
 CORS(api)
 
+@api.route('/user', methods=['GET'])
+def get_all_users():
+    users = User.query.all()
+    if len(users) < 1:
+        return jsonify({"msg": "not found"}), 404
+    serialized_users = list(map(lambda x: x.serialize(), users))
+    return serialized_users, 200
 
-@api.route('/hello', methods=['POST', 'GET'])
-def handle_hello():
+@api.route('/signup', methods=['POST'])
+def handle_signup():
+    body = json.loads(request.data)
+    # Verificar si el correo electronico ya existe
+    exist_user = User.query.filter_by(email = body['email']).first()
+    if exist_user:
+        return jsonify({'error': 'email already exists'}), 400
+    # Verificar si el país se proporciona en el cuerpo de la solicitud
+    countries_name = body.get("countries")
+    # Buscar el país en la base de datos o crear uno nuevo si no existe
+    if countries_name:
+        countries = Countries.query.filter_by(name=countries_name).first()
+        if not countries:
+            countries = Countries(name=countries_name)
+            db.session.add(countries)
+            db.session.commit()
+    else:
+        # Manejar el caso donde no se proporciona el país
+        countries = None
+    new_user = User(
+        email = body['email'],
+        name = body['name'],
+        password = body['password'],
+        countries = countries,
+    )
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'msg': 'User created succesfully'}), 200
 
-    response_body = {
-        "message": "Hello! I'm a message that came from the backend, check the network tab on the google inspector and you will see the GET request"
-    }
+@api.route('/posts', methods=['GET'])
+def get_all_posts():
+    posts = db.session.query(Posts, Tags).join(Tags).all()
+    result = list(map(lambda post:{
+        # Post
+        "idPost": post[0].id,
+        "img": post[0].img,
+        "comment": post[0].comment,
+        "date": post[0].date,
+        "categories": post[0].categories,
+        "user": post[0].user, 
 
-    return jsonify(response_body), 200
+        # Tags
+        "idTag": post[1].id,
+        "tagName": post[1].name,
+    }, posts))
+
+    return jsonify(result), 200
